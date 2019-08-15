@@ -67,6 +67,8 @@ func NewSwitch(base string, timeout time.Duration) (*Switch, error) {
 func (s *Switch) process(r *http.Request, i, o *bytes.Buffer) (int, http.Header, error) {
 	y := *(r.URL)
 	u := &y
+	u.Host = s.target.Host
+	u.Scheme = s.target.Scheme
 	if s.Pre != nil {
 		s.Pre(u.String(), u.Path, r.RemoteAddr, r.Header, i.Bytes())
 	}
@@ -75,8 +77,6 @@ func (s *Switch) process(r *http.Request, i, o *bytes.Buffer) (int, http.Header,
 			u.Path = path.Join(v, u.Path[len(k):])
 		}
 	}
-	u.Host = s.target.Host
-	u.Scheme = s.target.Scheme
 	x, err := http.NewRequest(r.Method, u.String(), i)
 	x.Header = r.Header
 	x.Trailer = r.Trailer
