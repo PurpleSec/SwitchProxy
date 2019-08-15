@@ -15,8 +15,8 @@ import (
 // Switch is a struct that repersents a connection between proxy services.
 // This struct contains mapping and functions to capture input and output.
 type Switch struct {
-	Pre  func(string, string, http.Header, []byte)
-	Post func(string, int, string, http.Header, []byte)
+	Pre  func(string, string, string, http.Header, []byte)
+	Post func(string, int, string, string, http.Header, []byte)
 
 	target  *url.URL
 	client  *http.Client
@@ -68,7 +68,7 @@ func (s *Switch) process(r *http.Request, i, o *bytes.Buffer) (int, http.Header,
 	y := *(r.URL)
 	u := &y
 	if s.Pre != nil {
-		s.Pre(u.String(), u.Path, r.Header, i.Bytes())
+		s.Pre(u.String(), u.Path, r.RemoteAddr, r.Header, i.Bytes())
 	}
 	for k, v := range s.rewrite {
 		if strings.HasPrefix(u.Path, k) {
@@ -98,7 +98,7 @@ func (s *Switch) process(r *http.Request, i, o *bytes.Buffer) (int, http.Header,
 		return 0, nil, err
 	}
 	if s.Post != nil {
-		s.Post(u.String(), p.StatusCode, u.Path, p.Header, o.Bytes())
+		s.Post(u.String(), p.StatusCode, u.Path, r.RemoteAddr, p.Header, o.Bytes())
 	}
 	return p.StatusCode, p.Header, nil
 }
