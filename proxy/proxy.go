@@ -100,10 +100,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, http.StatusText(http.StatusServiceUnavailable))
 	}
 	if len(p.secondary) > 0 {
-		o.Reset()
 		for n := range p.secondary {
-			p.secondary[n].process(r, i, o)
 			o.Reset()
+			p.secondary[n].process(r, i, o)
 		}
 	}
 }
