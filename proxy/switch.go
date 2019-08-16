@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -67,17 +68,18 @@ func NewSwitch(base string, timeout time.Duration) (*Switch, error) {
 func (s *Switch) process(r *http.Request, i, o *bytes.Buffer) (int, http.Header, error) {
 	y := *(r.URL)
 	u := &y
-	u.Host = s.target.Host
-	u.Scheme = s.target.Scheme
-	if s.Pre != nil {
-		s.Pre(u.String(), u.Path, r.RemoteAddr, r.Header, i.Bytes())
-	}
 	for k, v := range s.rewrite {
 		if strings.HasPrefix(u.Path, k) {
 			u.Path = path.Join(v, u.Path[len(k):])
 		}
 	}
+	u.Host = s.target.Host
+	u.Scheme = s.target.Scheme
+	if s.Pre != nil {
+		s.Pre(u.String(), u.Path, r.RemoteAddr, r.Header, i.Bytes())
+	}
 	x, err := http.NewRequest(r.Method, u.String(), i)
+	fmt.Printf("URLnew: %s\n", x.URL.String())
 	x.Header = r.Header
 	x.Trailer = r.Trailer
 	x.TransferEncoding = r.TransferEncoding
