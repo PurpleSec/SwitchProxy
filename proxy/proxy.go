@@ -80,31 +80,30 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	o := p.pool.Get().(*bytes.Buffer)
 	defer p.putClear(o)
-	for n := range p.secondary {
-		p.secondary[n].process(r, i, o)
-		o.Reset()
-	}
 	if p.primary != nil {
 		c, h, err := p.primary.process(r, i, o)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(w, http.StatusText(http.StatusInternalServerError))
-			fmt.Fprintf(w, err.Error())
-			return
-		}
-		for k, v := range h {
-			w.Header()[k] = v
-		}
-		w.WriteHeader(c)
-		if _, err := io.Copy(w, o); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, http.StatusText(http.StatusInternalServerError))
-			fmt.Fprintf(w, err.Error())
-			return
+		} else {
+			for k, v := range h {
+				w.Header()[k] = v
+			}
+			w.WriteHeader(c)
+			if _, err := io.Copy(w, o); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprintf(w, http.StatusText(http.StatusInternalServerError))
+			}
 		}
 	} else {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		fmt.Fprintf(w, http.StatusText(http.StatusServiceUnavailable))
-		return
+	}
+	if len(p.secondary) > 0 {
+		o.Reset()
+		for n := range p.secondary {
+			p.secondary[n].process(r, i, o)
+			o.Reset()
+		}
 	}
 }
