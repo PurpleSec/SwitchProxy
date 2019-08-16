@@ -3,7 +3,6 @@ package proxy
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -70,7 +69,6 @@ func (s *Switch) process(r *http.Request, i, o *bytes.Buffer) (int, http.Header,
 	u := &y
 	u.Host = s.target.Host
 	u.Scheme = s.target.Scheme
-	fmt.Print("URL: >> %s\n", u.String())
 	if s.Pre != nil {
 		s.Pre(u.String(), u.Path, r.RemoteAddr, r.Header, i.Bytes())
 	}
@@ -99,7 +97,6 @@ func (s *Switch) process(r *http.Request, i, o *bytes.Buffer) (int, http.Header,
 	if _, err := io.Copy(o, p.Body); err != nil {
 		return 0, nil, err
 	}
-	fmt.Print("URL: >> %s\n", u.String())
 	if s.Post != nil {
 		s.Post(u.String(), p.StatusCode, u.Path, r.RemoteAddr, p.Header, o.Bytes())
 	}
