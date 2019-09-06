@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Switch is a struct that repersents a connection between proxy services.
+// Switch is a struct that represents a connection between proxy services.
 // This struct contains mapping and functions to capture input and output.
 type Switch struct {
 	Pre  func(url string, path string, ip string, method string, headers http.Header, data []byte)

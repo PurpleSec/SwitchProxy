@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-// Proxy is a struct that repersents a stacked proxy that allows a forwarding proxy
+// Proxy is a struct that represents a stacked proxy that allows a forwarding proxy
 // with secondary read only Switch connections that allow logging and storing the connection data.
 type Proxy struct {
 	key       string
@@ -68,7 +68,7 @@ func NewProxyEx(listen, cert, key string) *Proxy {
 	return p
 }
 
-// ServeHTTP satisifies the http.Hanndler interface.
+// ServeHTTP satisfies the http.Handler interface.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	i := p.pool.Get().(*bytes.Buffer)
 	defer p.putClear(i)
