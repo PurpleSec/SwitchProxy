@@ -55,8 +55,16 @@ func NewSwitch(base string, timeout time.Duration) (*Switch, error) {
 		s.client = &http.Client{
 			Timeout: timeout,
 			Transport: &http.Transport{
-				Dial:                (&net.Dialer{Timeout: timeout}).Dial,
-				TLSHandshakeTimeout: timeout,
+				Proxy: http.ProxyFromEnvironment,
+				DialContext: (&net.Dialer{
+					Timeout:   timeout,
+					KeepAlive: timeout,
+					DualStack: true,
+				}).DialContext,
+				IdleConnTimeout:       timeout,
+				TLSHandshakeTimeout:   timeout,
+				ExpectContinueTimeout: timeout,
+				ResponseHeaderTimeout: timeout,
 			},
 		}
 	} else {

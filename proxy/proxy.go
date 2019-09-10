@@ -6,6 +6,13 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
+)
+
+const (
+	// DefaultTimeout is the default timeout value used when a Timeout is not
+	// specified in NewProxy.
+	DefaultTimeout = time.Second * time.Duration(15)
 )
 
 // Proxy is a struct that represents a stacked proxy that allows a forwarding proxy
@@ -35,7 +42,7 @@ func (p *Proxy) Primary(s *Switch) {
 
 // NewProxy creates a new Proxy struct from the supplied options.
 func NewProxy(listen string) *Proxy {
-	return NewProxyEx(listen, "", "")
+	return NewProxyEx(DefaultTimeout, listen, "", "")
 }
 func (p *Proxy) putClear(b *bytes.Buffer) {
 	b.Reset()
@@ -45,27 +52,6 @@ func (p *Proxy) putClear(b *bytes.Buffer) {
 // AddSecondary adds an additional one-way Switch context.
 func (p *Proxy) AddSecondary(s ...*Switch) {
 	p.secondary = append(p.secondary, s...)
-}
-
-// NewProxyEx creates a new Proxy struct from the supplied options.
-// This function allows fos specifying TLS options.
-func NewProxyEx(listen, cert, key string) *Proxy {
-	p := &Proxy{
-		key:  key,
-		cert: cert,
-		pool: &sync.Pool{
-			New: func() interface{} {
-				return new(bytes.Buffer)
-			},
-		},
-		server: &http.Server{
-			Addr:    listen,
-			Handler: &http.ServeMux{},
-		},
-		secondary: make([]*Switch, 0),
-	}
-	p.server.Handler.(*http.ServeMux).Handle("/", p)
-	return p
 }
 
 // ServeHTTP satisfies the http.Handler interface.
@@ -105,4 +91,29 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			p.secondary[n].process(r, i, o)
 		}
 	}
+}
+
+// NewProxyEx creates a new Proxy struct from the supplied options.
+// This function allows fos specifying TLS options.
+func NewProxyEx(timeout time.Duration, listen, cert, key string) *Proxy {
+	p := &Proxy{
+		key:  key,
+		cert: cert,
+		pool: &sync.Pool{
+			New: func() interface{} {
+				return new(bytes.Buffer)
+			},
+		},
+		server: &http.Server{
+			Addr:              listen,
+			Handler:           &http.ServeMux{},
+			ReadTimeout:       timeout,
+			IdleTimeout:       timeout,
+			WriteTimeout:      timeout,
+			ReadHeaderTimeout: timeout,
+		},
+		secondary: make([]*Switch, 0),
+	}
+	p.server.Handler.(*http.ServeMux).Handle("/", p)
+	return p
 }
