@@ -1,8 +1,8 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -10,18 +10,41 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
+
+// Result is a struct that contains the data of the resulting Switch
+// operation to be passed to Handlers.
+type Result struct {
+	IP      string      `json:"ip"`
+	URL     string      `json:"url"`
+	UUID    string      `json:"uuid"`
+	Path    string      `json:"path"`
+	Status  uint16      `json:"status"`
+	Method  string      `json:"method"`
+	Content []byte      `json:"content"`
+	Headers http.Header `json:"headers"`
+}
 
 // Switch is a struct that represents a connection between proxy services.
 // This struct contains mapping and functions to capture input and output.
 type Switch struct {
-	Pre  func(url string, path string, ip string, method string, headers http.Header, data []byte)
-	Post func(url string, path string, ip string, method string, status int, headers http.Header, data []byte)
+	Pre, Post Handler
 
-	target  *url.URL
 	client  *http.Client
 	timeout time.Duration
 	rewrite map[string]string
+
+	url.URL
+}
+
+// Handler is a function alias that can be passed a Result for processing.
+type Handler func(Result)
+
+// IsResponse is a function that returns true if the Result is for a response.
+func (r Result) IsResponse() bool {
+	return len(r.Method) > 0 && r.Status > 0
 }
 
 // Rewrite adds a URL rewrite from the Switch.
@@ -38,75 +61,97 @@ func (s *Switch) RemoveRewrite(from string) {
 
 // NewSwitch creates a switching context that allows the connection to be proxied
 // to the specified server.
-func NewSwitch(base string, timeout time.Duration) (*Switch, error) {
-	u, err := url.Parse(base)
+func NewSwitch(target string) (*Switch, error) {
+	return NewSwitchTimeout(target, DefaultTimeout)
+}
+
+// NewSwitchTimeout creates a switching context that allows the connection to be proxied
+// to the specified server. This function will set the specified timeout.
+func NewSwitchTimeout(target string, t time.Duration) (*Switch, error) {
+	u, err := url.Parse(target)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to resolve URL: %w", err)
 	}
 	if !u.IsAbs() {
 		u.Scheme = "http"
 	}
 	s := &Switch{
-		target:  u,
-		timeout: timeout,
-		rewrite: make(map[string]string),
-	}
-	if timeout > 0 {
-		s.client = &http.Client{
-			Timeout: timeout,
+		URL: *u,
+		client: &http.Client{
+			Timeout: t,
 			Transport: &http.Transport{
 				Proxy: http.ProxyFromEnvironment,
 				DialContext: (&net.Dialer{
-					Timeout:   timeout,
-					KeepAlive: timeout,
+					Timeout:   t,
+					KeepAlive: t,
 					DualStack: true,
 				}).DialContext,
-				IdleConnTimeout:       timeout,
-				TLSHandshakeTimeout:   timeout,
-				ExpectContinueTimeout: timeout,
-				ResponseHeaderTimeout: timeout,
+				IdleConnTimeout:       t,
+				TLSHandshakeTimeout:   t,
+				ExpectContinueTimeout: t,
+				ResponseHeaderTimeout: t,
 			},
-		}
-	} else {
-		s.client = &http.Client{}
+		},
+		timeout: t,
+		rewrite: make(map[string]string),
 	}
 	return s, nil
 }
-func (s *Switch) process(r *http.Request, i, o *bytes.Buffer) (int, http.Header, error) {
-	y := *(r.URL)
-	u := &y
+func (s Switch) process(x context.Context, r *http.Request, t *transfer) (int, http.Header, error) {
+	s.URL.Path = r.URL.Path
+	s.URL.User = r.URL.User
+	s.URL.Opaque = r.URL.Opaque
+	s.URL.Fragment = r.URL.Fragment
+	s.URL.RawQuery = r.URL.RawQuery
+	s.URL.ForceQuery = r.URL.ForceQuery
 	for k, v := range s.rewrite {
-		if strings.HasPrefix(u.Path, k) {
-			u.Path = path.Join(v, u.Path[len(k):])
+		if strings.HasPrefix(s.URL.Path, k) {
+			s.URL.Path = path.Join(v, s.URL.Path[len(k):])
 		}
 	}
-	u.Host = s.target.Host
-	u.Scheme = s.target.Scheme
-	x, err := http.NewRequest(r.Method, u.String(), i)
-	if s.Pre != nil {
-		s.Pre(x.URL.String(), x.URL.Path, r.RemoteAddr, r.Method, r.Header, i.Bytes())
-	}
-	x.Header = r.Header
-	x.Trailer = r.Trailer
-	x.TransferEncoding = r.TransferEncoding
-	if err != nil {
-		return 0, nil, err
-	}
 	if s.timeout > 0 {
-		c, f := context.WithTimeout(r.Context(), s.timeout)
-		x = x.WithContext(c)
+		var f context.CancelFunc
+		x, f = context.WithTimeout(x, s.timeout)
 		defer f()
 	}
-	p, err := s.client.Do(x)
+	u := uuid.New().String()
+	q, err := http.NewRequestWithContext(x, r.Method, s.URL.String(), t.in)
 	if err != nil {
 		return 0, nil, err
 	}
-	defer p.Body.Close()
-	if _, err := io.Copy(o, p.Body); err != nil {
+	if s.Pre != nil {
+		s.Pre(Result{
+			IP:      r.RemoteAddr,
+			URL:     s.URL.String(),
+			UUID:    u,
+			Path:    s.Path,
+			Method:  r.Method,
+			Content: t.data,
+			Headers: r.Header,
+		})
+	}
+	q.Header = r.Header
+	q.Trailer = r.Trailer
+	q.TransferEncoding = r.TransferEncoding
+	o, err := s.client.Do(q)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer o.Body.Close()
+	if _, err := io.Copy(t.out, o.Body); err != nil {
 		return 0, nil, err
 	}
 	if s.Post != nil {
-		s.Post(u.String(), u.Path, r.RemoteAddr, r.Method, p.StatusCode, p.Header, o.Bytes())
+		s.Post(Result{
+			IP:      r.RemoteAddr,
+			URL:     s.URL.String(),
+			Path:    s.Path,
+			UUID:    u,
+			Status:  uint16(o.StatusCode),
+			Method:  r.Method,
+			Content: t.out.Bytes(),
+			Headers: o.Header,
+		})
 	}
-	return p.StatusCode, p.Header, nil
+	return o.StatusCode, o.Header, nil
 }

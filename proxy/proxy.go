@@ -2,8 +2,10 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -18,17 +20,32 @@ const (
 // Proxy is a struct that represents a stacked proxy that allows a forwarding proxy
 // with secondary read only Switch connections that allow logging and storing the connection data.
 type Proxy struct {
+	ctx       context.Context
 	key       string
 	cert      string
 	pool      *sync.Pool
 	server    *http.Server
+	cancel    context.CancelFunc
 	primary   *Switch
 	secondary []*Switch
+}
+type transfer struct {
+	in   *bytes.Reader
+	out  *bytes.Buffer
+	read *bytes.Buffer
+	data []byte
+}
+
+// Stop attempts to gracefully close and Stop the proxy and all remaining connextions.
+func (p *Proxy) Stop() error {
+	p.cancel()
+	return p.server.Close()
 }
 
 // Start starts the Server listening loop and returns an error if the server could not be started.
 // Only returns an error if any IO issues occur during operation.
 func (p *Proxy) Start() error {
+	defer p.Stop()
 	if len(p.cert) > 0 && len(p.key) > 0 {
 		return p.server.ListenAndServeTLS(p.cert, p.key)
 	}
@@ -39,44 +56,44 @@ func (p *Proxy) Start() error {
 func (p *Proxy) Primary(s *Switch) {
 	p.primary = s
 }
-
-// NewProxy creates a new Proxy struct from the supplied options.
-func NewProxy(listen string) *Proxy {
-	return NewProxyEx(DefaultTimeout, listen, "", "")
-}
-func (p *Proxy) putClear(b *bytes.Buffer) {
-	b.Reset()
-	p.pool.Put(b)
+func (p *Proxy) clear(t *transfer) {
+	t.in = nil
+	t.data = nil
+	t.out.Reset()
+	t.read.Reset()
+	p.pool.Put(t)
 }
 
 // AddSecondary adds an additional one-way Switch context.
 func (p *Proxy) AddSecondary(s ...*Switch) {
 	p.secondary = append(p.secondary, s...)
 }
+func (p *Proxy) context(_ net.Listener) context.Context {
+	return p.ctx
+}
 
 // ServeHTTP satisfies the http.Handler interface.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	i := p.pool.Get().(*bytes.Buffer)
-	defer p.putClear(i)
+	t := p.pool.Get().(*transfer)
+	defer p.clear(t)
 	defer r.Body.Close()
-	if _, err := io.Copy(i, r.Body); err != nil {
+	if _, err := io.Copy(t.read, r.Body); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, http.StatusText(http.StatusInternalServerError))
 		return
 	}
-	o := p.pool.Get().(*bytes.Buffer)
-	defer p.putClear(o)
+	t.data = t.read.Bytes()
+	t.in = bytes.NewReader(t.data)
 	if p.primary != nil {
-		c, h, err := p.primary.process(r, i, o)
-		if err != nil {
+		if s, h, err := p.primary.process(p.ctx, r, t); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(w, http.StatusText(http.StatusInternalServerError))
 		} else {
 			for k, v := range h {
 				w.Header()[k] = v
 			}
-			w.WriteHeader(c)
-			if _, err := io.Copy(w, o); err != nil {
+			w.WriteHeader(s)
+			if _, err := io.Copy(w, t.out); err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(w, http.StatusText(http.StatusInternalServerError))
 			}
@@ -86,34 +103,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, http.StatusText(http.StatusServiceUnavailable))
 	}
 	if len(p.secondary) > 0 {
-		for n := range p.secondary {
-			o.Reset()
-			p.secondary[n].process(r, i, o)
+		for i := range p.secondary {
+			t.out.Reset()
+			t.in.Seek(0, 0)
+			p.secondary[i].process(p.ctx, r, t)
 		}
 	}
-}
-
-// NewProxyEx creates a new Proxy struct from the supplied options.
-// This function allows fos specifying TLS options.
-func NewProxyEx(timeout time.Duration, listen, cert, key string) *Proxy {
-	p := &Proxy{
-		key:  key,
-		cert: cert,
-		pool: &sync.Pool{
-			New: func() interface{} {
-				return new(bytes.Buffer)
-			},
-		},
-		server: &http.Server{
-			Addr:              listen,
-			Handler:           &http.ServeMux{},
-			ReadTimeout:       timeout,
-			IdleTimeout:       timeout,
-			WriteTimeout:      timeout,
-			ReadHeaderTimeout: timeout,
-		},
-		secondary: make([]*Switch, 0),
-	}
-	p.server.Handler.(*http.ServeMux).Handle("/", p)
-	return p
 }
