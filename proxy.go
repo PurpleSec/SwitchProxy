@@ -19,7 +19,6 @@ package switchproxy
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -94,29 +93,25 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer p.clear(t)
 	defer r.Body.Close()
 	if _, err := io.Copy(t.read, r.Body); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, http.StatusText(http.StatusInternalServerError))
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	t.data = t.read.Bytes()
 	t.in = bytes.NewReader(t.data)
 	if p.primary != nil {
 		if s, h, err := p.primary.process(p.ctx, r, t); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, http.StatusText(http.StatusInternalServerError))
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		} else {
 			for k, v := range h {
 				w.Header()[k] = v
 			}
 			w.WriteHeader(s)
 			if _, err := io.Copy(w, t.out); err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, http.StatusText(http.StatusInternalServerError))
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			}
 		}
 	} else {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, http.StatusText(http.StatusServiceUnavailable))
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 	}
 	if len(p.secondary) > 0 {
 		for i := range p.secondary {
