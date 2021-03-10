@@ -1,4 +1,4 @@
-module github.com/iDigitalFlame/switchproxy
+module github.com/PurpleSec/switchproxy
 
 go 1.12
 
