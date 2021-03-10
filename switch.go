@@ -33,26 +33,25 @@ import (
 // Result is a struct that contains the data of the resulting Switch
 // operation to be passed to Handlers.
 type Result struct {
+	Headers http.Header `json:"headers"`
 	IP      string      `json:"ip"`
-	URL     string      `json:"url"`
 	UUID    string      `json:"uuid"`
 	Path    string      `json:"path"`
-	Status  uint16      `json:"status"`
 	Method  string      `json:"method"`
+	URL     string      `json:"url"`
 	Content []byte      `json:"content"`
-	Headers http.Header `json:"headers"`
+	Status  uint16      `json:"status"`
 }
 
 // Switch is a struct that represents a connection between proxy services.
 // This struct contains mapping and functions to capture input and output.
 type Switch struct {
-	Pre, Post Handler
-
+	Pre     Handler
+	Post    Handler
 	client  *http.Client
-	timeout time.Duration
 	rewrite map[string]string
-
 	url.URL
+	timeout time.Duration
 }
 
 // Handler is a function alias that can be passed a Result for processing.
