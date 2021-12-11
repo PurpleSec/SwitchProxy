@@ -1,4 +1,4 @@
-// Copyright 2021 PurpleSec Team
+// Copyright 2021 - 2022 PurpleSec Team
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published
@@ -18,7 +18,7 @@ package switchproxy
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -63,6 +63,7 @@ func (r Result) IsResponse() bool {
 }
 
 // Rewrite adds a URL rewrite from the Switch.
+//
 // If a URL starts with the 'from' paramater, it will be replaced with the 'to'
 // paramater, only if starting with on the URL path.
 func (s *Switch) Rewrite(from, to string) {
@@ -80,12 +81,14 @@ func NewSwitch(target string) (*Switch, error) {
 	return NewSwitchTimeout(target, DefaultTimeout)
 }
 
-// NewSwitchTimeout creates a switching context that allows the connection to be proxied
-// to the specified server. This function will set the specified timeout.
+// NewSwitchTimeout creates a switching context that allows the connection to be
+// proxied to the specified server.
+//
+// This function will set the specified timeout.
 func NewSwitchTimeout(target string, t time.Duration) (*Switch, error) {
 	u, err := url.Parse(target)
 	if err != nil {
-		return nil, fmt.Errorf("unable to resolve URL: %w", err)
+		return nil, errors.New("unable to resolve URL: " + err.Error())
 	}
 	if !u.IsAbs() {
 		u.Scheme = "http"
@@ -113,31 +116,33 @@ func NewSwitchTimeout(target string, t time.Duration) (*Switch, error) {
 	return s, nil
 }
 func (s Switch) process(x context.Context, r *http.Request, t *transfer) (int, http.Header, error) {
-	s.URL.Path = r.URL.Path
-	s.URL.User = r.URL.User
-	s.URL.Opaque = r.URL.Opaque
-	s.URL.Fragment = r.URL.Fragment
-	s.URL.RawQuery = r.URL.RawQuery
-	s.URL.ForceQuery = r.URL.ForceQuery
+	s.Path = r.URL.Path
+	s.User = r.URL.User
+	s.Opaque = r.URL.Opaque
+	s.Fragment = r.URL.Fragment
+	s.RawQuery = r.URL.RawQuery
+	s.ForceQuery = r.URL.ForceQuery
 	for k, v := range s.rewrite {
-		if strings.HasPrefix(s.URL.Path, k) {
-			s.URL.Path = path.Join(v, s.URL.Path[len(k):])
+		if strings.HasPrefix(s.Path, k) {
+			s.Path = path.Join(v, s.Path[len(k):])
 		}
 	}
+	var f func()
 	if s.timeout > 0 {
-		var f context.CancelFunc
 		x, f = context.WithTimeout(x, s.timeout)
-		defer f()
 	}
-	u := uuid.New().String()
-	q, err := http.NewRequestWithContext(x, r.Method, s.URL.String(), t.in)
+	var (
+		u      = uuid.New().String()
+		q, err = http.NewRequestWithContext(x, r.Method, s.String(), t.in)
+	)
 	if err != nil {
+		f()
 		return 0, nil, err
 	}
 	if s.Pre != nil {
 		s.Pre(Result{
 			IP:      r.RemoteAddr,
-			URL:     s.URL.String(),
+			URL:     s.String(),
 			UUID:    u,
 			Path:    s.Path,
 			Method:  r.Method,
@@ -150,16 +155,18 @@ func (s Switch) process(x context.Context, r *http.Request, t *transfer) (int, h
 	q.TransferEncoding = r.TransferEncoding
 	o, err := s.client.Do(q)
 	if err != nil {
+		f()
 		return 0, nil, err
 	}
-	defer o.Body.Close()
 	if _, err := io.Copy(t.out, o.Body); err != nil {
+		f()
+		o.Body.Close()
 		return 0, nil, err
 	}
 	if s.Post != nil {
 		s.Post(Result{
 			IP:      r.RemoteAddr,
-			URL:     s.URL.String(),
+			URL:     s.String(),
 			Path:    s.Path,
 			UUID:    u,
 			Status:  uint16(o.StatusCode),
@@ -168,5 +175,7 @@ func (s Switch) process(x context.Context, r *http.Request, t *transfer) (int, h
 			Headers: o.Header,
 		})
 	}
+	f()
+	o.Body.Close()
 	return o.StatusCode, o.Header, nil
 }

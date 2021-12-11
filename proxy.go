@@ -1,4 +1,4 @@
-// Copyright 2021 PurpleSec Team
+// Copyright 2021 - 2022 PurpleSec Team
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published
@@ -19,6 +19,7 @@ package switchproxy
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"io"
 	"net"
 	"net/http"
@@ -26,14 +27,13 @@ import (
 	"time"
 )
 
-const (
-	// DefaultTimeout is the default timeout value used when a Timeout is not
-	// specified in NewProxy.
-	DefaultTimeout = time.Second * time.Duration(15)
-)
+// DefaultTimeout is the default timeout value used when a Timeout is not
+// specified in NewProxy.
+const DefaultTimeout = time.Second * time.Duration(15)
 
 // Proxy is a struct that represents a stacked proxy that allows a forwarding proxy
-// with secondary read only Switch connections that allow logging and storing the connection data.
+// with secondary read only Switch connections that allow logging and storing
+// the connection data.
 type Proxy struct {
 	ctx       context.Context
 	key       string
@@ -51,20 +51,40 @@ type transfer struct {
 	data []byte
 }
 
-// Stop attempts to gracefully close and Stop the proxy and all remaining connextions.
-func (p *Proxy) Stop() error {
+// Close attempts to gracefully close and stop the proxy and all remaining
+// connextions.
+func (p *Proxy) Close() error {
 	p.cancel()
 	return p.server.Close()
 }
 
-// Start starts the Server listening loop and returns an error if the server could not be started.
+// Start starts the Server listening loop and returns an error if the server
+// could not be started.
+//
 // Only returns an error if any IO issues occur during operation.
 func (p *Proxy) Start() error {
-	defer p.Stop()
+	var err error
 	if len(p.cert) > 0 && len(p.key) > 0 {
-		return p.server.ListenAndServeTLS(p.cert, p.key)
+		p.server.TLSConfig = &tls.Config{
+			NextProtos: []string{"h2", "http/1.1"},
+			MinVersion: tls.VersionTLS12,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+				tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			},
+			CurvePreferences:         []tls.CurveID{tls.CurveP256, tls.X25519},
+			PreferServerCipherSuites: true,
+		}
+		err = p.server.ListenAndServeTLS(p.cert, p.key)
+	} else {
+		err = p.server.ListenAndServe()
 	}
-	return p.server.ListenAndServe()
+	p.Close()
+	return err
 }
 
 // Primary sets the primary Proxy Switch context.
@@ -72,8 +92,7 @@ func (p *Proxy) Primary(s *Switch) {
 	p.primary = s
 }
 func (p *Proxy) clear(t *transfer) {
-	t.in = nil
-	t.data = nil
+	t.in, t.data = nil, nil
 	t.out.Reset()
 	t.read.Reset()
 	p.pool.Put(t)
@@ -90,15 +109,14 @@ func (p *Proxy) context(_ net.Listener) context.Context {
 // ServeHTTP satisfies the http.Handler interface.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	t := p.pool.Get().(*transfer)
-	defer p.clear(t)
-	defer r.Body.Close()
 	if _, err := io.Copy(t.read, r.Body); err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		p.clear(t)
+		r.Body.Close()
 		return
 	}
 	t.data = t.read.Bytes()
-	t.in = bytes.NewReader(t.data)
-	if p.primary != nil {
+	if t.in = bytes.NewReader(t.data); p.primary != nil {
 		if s, h, err := p.primary.process(p.ctx, r, t); err != nil {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		} else {
@@ -120,4 +138,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			p.secondary[i].process(p.ctx, r, t)
 		}
 	}
+	p.clear(t)
+	r.Body.Close()
 }

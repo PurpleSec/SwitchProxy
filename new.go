@@ -1,4 +1,4 @@
-// Copyright 2021 PurpleSec Team
+// Copyright 2021 - 2022 PurpleSec Team
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published
@@ -48,21 +48,22 @@ func (t Timeout) config(p *Proxy) {
 	p.server.ReadHeaderTimeout = time.Duration(t)
 }
 
-// TLS creates a config paramater with the specified Key and Value file
-// paths.
+// TLS creates a config paramater with the specified Key and Value file paths.
 func TLS(cert, key string) Parameter {
 	return &keys{Cert: cert, Key: key}
 }
 
-// New creates a new Proxy instance from the specified listen
-// address and optional parameters.
+// New creates a new Proxy instance from the specified listen address and
+// optional parameters.
 func New(listen string, c ...Parameter) *Proxy {
 	return NewContext(context.Background(), listen, c...)
 }
 
-// NewContext creates a new Proxy instance from the specified listen
-// address and optional parameters. This function allows the caller to specify
-// a context to specify when to shutdown the Proxy.
+// NewContext creates a new Proxy instance from the specified listen address and
+// optional parameters.
+//
+// This function allows the caller to specify a context to specify when to shutdown
+// the Proxy.
 func NewContext(x context.Context, listen string, c ...Parameter) *Proxy {
 	p := &Proxy{
 		pool: &sync.Pool{
@@ -86,10 +87,8 @@ func NewContext(x context.Context, listen string, c ...Parameter) *Proxy {
 		c[i].config(p)
 	}
 	if len(c) == 0 {
-		p.server.ReadTimeout = DefaultTimeout
-		p.server.IdleTimeout = DefaultTimeout
-		p.server.WriteTimeout = DefaultTimeout
-		p.server.ReadHeaderTimeout = DefaultTimeout
+		p.server.ReadTimeout, p.server.IdleTimeout = DefaultTimeout, DefaultTimeout
+		p.server.WriteTimeout, p.server.ReadHeaderTimeout = DefaultTimeout, DefaultTimeout
 	}
 	return p
 }
