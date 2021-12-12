@@ -27,8 +27,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	// Import unsafe to use "fastrand" function
+	_ "unsafe"
 )
+
+const table = "0123456789ABCDEF"
 
 // Result is a struct that contains the data of the resulting Switch
 // operation to be passed to Handlers.
@@ -56,6 +59,20 @@ type Switch struct {
 
 // Handler is a function alias that can be passed a Result for processing.
 type Handler func(Result)
+
+//go:linkname fastRand runtime.fastrand
+func fastRand() uint32
+func newUUID() string {
+	var b [64]byte
+	for i := 0; i < 64; i += 2 {
+		v := byte(fastRand() & 0xFF)
+		if v < 16 {
+			b[i], b[i+1] = '0', table[v&0x0F]
+		}
+		b[i], b[i+1] = table[v>>4], table[v&0x0F]
+	}
+	return string(b[:])
+}
 
 // IsResponse is a function that returns true if the Result is for a response.
 func (r Result) IsResponse() bool {
@@ -131,14 +148,12 @@ func (s Switch) process(x context.Context, r *http.Request, t *transfer) (int, h
 	if s.timeout > 0 {
 		x, f = context.WithTimeout(x, s.timeout)
 	}
-	var (
-		u      = uuid.New().String()
-		q, err = http.NewRequestWithContext(x, r.Method, s.String(), t.in)
-	)
+	q, err := http.NewRequestWithContext(x, r.Method, s.String(), t.in)
 	if err != nil {
 		f()
 		return 0, nil, err
 	}
+	u := newUUID()
 	if s.Pre != nil {
 		s.Pre(Result{
 			IP:      r.RemoteAddr,
