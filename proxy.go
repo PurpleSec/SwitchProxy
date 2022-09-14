@@ -52,7 +52,7 @@ type transfer struct {
 }
 
 // Close attempts to gracefully close and stop the proxy and all remaining
-// connextions.
+// connections.
 func (p *Proxy) Close() error {
 	p.cancel()
 	return p.server.Close()
@@ -77,7 +77,6 @@ func (p *Proxy) Start() error {
 				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 			},
 			CurvePreferences:         []tls.CurveID{tls.CurveP256, tls.X25519},
-			PreferServerCipherSuites: true,
 		}
 		err = p.server.ListenAndServeTLS(p.cert, p.key)
 	} else {
@@ -98,7 +97,7 @@ func (p *Proxy) clear(t *transfer) {
 	p.pool.Put(t)
 }
 
-// AddSecondary adds an additional one-way Switch context.
+// AddSecondary adds a one-way Switch context.
 func (p *Proxy) AddSecondary(s ...*Switch) {
 	p.secondary = append(p.secondary, s...)
 }

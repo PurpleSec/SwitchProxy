@@ -38,17 +38,15 @@ type Parameter interface {
 }
 
 func (k keys) config(p *Proxy) {
-	p.key = k.Key
-	p.cert = k.Cert
+	p.key, p.cert = k.Key, k.Cert
 }
 func (t Timeout) config(p *Proxy) {
 	p.server.ReadTimeout = time.Duration(t)
-	p.server.IdleTimeout = time.Duration(t)
-	p.server.WriteTimeout = time.Duration(t)
-	p.server.ReadHeaderTimeout = time.Duration(t)
+	p.server.IdleTimeout, p.server.WriteTimeout = p.server.ReadTimeout, p.server.ReadTimeout
+	p.server.ReadHeaderTimeout = p.server.ReadTimeout
 }
 
-// TLS creates a config paramater with the specified Key and Value file paths.
+// TLS creates a config parameter with the specified Key and Value file paths.
 func TLS(cert, key string) Parameter {
 	return &keys{Cert: cert, Key: key}
 }
@@ -62,22 +60,16 @@ func New(listen string, c ...Parameter) *Proxy {
 // NewContext creates a new Proxy instance from the specified listen address and
 // optional parameters.
 //
-// This function allows the caller to specify a context to specify when to shutdown
+// This function allows the caller to specify a context to specify when to shut down
 // the Proxy.
 func NewContext(x context.Context, listen string, c ...Parameter) *Proxy {
 	p := &Proxy{
 		pool: &sync.Pool{
 			New: func() interface{} {
-				return &transfer{
-					out:  new(bytes.Buffer),
-					read: new(bytes.Buffer),
-				}
+				return &transfer{out: new(bytes.Buffer), read: new(bytes.Buffer)}
 			},
 		},
-		server: &http.Server{
-			Addr:    listen,
-			Handler: &http.ServeMux{},
-		},
+		server:    &http.Server{Addr: listen, Handler: &http.ServeMux{}},
 		secondary: make([]*Switch, 0),
 	}
 	p.server.BaseContext = p.context

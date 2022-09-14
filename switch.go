@@ -81,8 +81,8 @@ func (r Result) IsResponse() bool {
 
 // Rewrite adds a URL rewrite from the Switch.
 //
-// If a URL starts with the 'from' paramater, it will be replaced with the 'to'
-// paramater, only if starting with on the URL path.
+// If a URL starts with the 'from' parameter, it will be replaced with the 'to'
+// parameter, only if starting with on the URL path.
 func (s *Switch) Rewrite(from, to string) {
 	s.rewrite[from] = to
 }
@@ -119,7 +119,6 @@ func NewSwitchTimeout(target string, t time.Duration) (*Switch, error) {
 				DialContext: (&net.Dialer{
 					Timeout:   t,
 					KeepAlive: t,
-					DualStack: true,
 				}).DialContext,
 				IdleConnTimeout:       t,
 				TLSHandshakeTimeout:   t,
@@ -144,7 +143,7 @@ func (s Switch) process(x context.Context, r *http.Request, t *transfer) (int, h
 			s.Path = path.Join(v, s.Path[len(k):])
 		}
 	}
-	var f func()
+	f := func() {}
 	if s.timeout > 0 {
 		x, f = context.WithTimeout(x, s.timeout)
 	}
@@ -165,8 +164,7 @@ func (s Switch) process(x context.Context, r *http.Request, t *transfer) (int, h
 			Headers: r.Header,
 		})
 	}
-	q.Header = r.Header
-	q.Trailer = r.Trailer
+	q.Header, q.Trailer = r.Header, r.Trailer
 	q.TransferEncoding = r.TransferEncoding
 	o, err := s.client.Do(q)
 	if err != nil {
