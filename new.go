@@ -1,4 +1,4 @@
-// Copyright 2021 - 2022 PurpleSec Team
+// Copyright 2021 - 2023 PurpleSec Team
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published
@@ -31,8 +31,7 @@ type keys struct {
 // Timeout is a time.Duration alias of a configuration option.
 type Timeout time.Duration
 
-// Parameter is an interface that helps define config options for the
-// Proxy struct.
+// Parameter is an interface that helps define config options for the Proxy struct.
 type Parameter interface {
 	config(*Proxy)
 }
